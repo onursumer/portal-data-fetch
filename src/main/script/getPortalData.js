@@ -19,19 +19,40 @@ function main(args)
 	var studies = parseInput(studyInput);
 	var genes = parseInput(geneInput);
 
-	var mutationProfiles = constructMutationProfiles(studies);
-	var queryString = constructQueryString("getMutationData", genes, mutationProfiles);
-
-	// create the web page
-	var page = webPage.create();
-
-	// fetch & output the data
-	fetchData(page, queryString, function(data) {
-		// TODO parse, format, output the data
-		console.log("[" + new Date() + "] writing data to the output: " + output);
-		fs.write(output, data, 'w');
+	getMutationData(studies, genes, output, function(data) {
 		phantom.exit(0);
 	});
+
+	function getCopyNumberData(studies, genes, output, callback)
+	{
+		// TODO for each study, find out all CNA related profiles (genetic_profile_id)
+		var cmd = "getProfileData";
+
+		// TODO get data with multiple requests, and combine data in a single output
+		var caseSetId = ""; // (case_set_id) "..._all"
+	}
+
+	function getMutationData(studies, genes, output, callback)
+	{
+		var mutationProfiles = constructMutationProfiles(studies);
+		var queryString = constructQueryString("getMutationData", genes, mutationProfiles);
+
+		// create the web page
+		var page = webPage.create();
+
+		// fetch & output the data
+		fetchData(page, queryString, function(data) {
+			// TODO parse, format, output the data
+			console.log("[" + new Date() + "] writing data to the output: " + output);
+			fs.write(output, data, 'w');
+			page.close();
+
+			if (_.isFunction(callback))
+			{
+				callback(data);
+			}
+		});
+	}
 
 	function parseInput(input)
 	{
@@ -48,9 +69,12 @@ function main(args)
 		return profiles;
 	}
 
-	function constructQueryString(cmd, genes, profiles)
+	function constructQueryString(cmd, genes, profiles, caseSetId)
 	{
-		return "cmd=" + cmd + "&genetic_profile_id=" + profiles.join("+") + "&gene_list=" + genes.join("+");
+		return "cmd=" + cmd +
+			"&genetic_profile_id=" + profiles.join("+") +
+			"&gene_list=" + genes.join("+") +
+			"&case_set_id=" + caseSetId;
 	}
 
 	function fetchData(page, queryString, callback)
