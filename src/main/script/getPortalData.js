@@ -13,39 +13,126 @@ function main(args)
 	var password = args["password"] || args["p"];
 	var geneInput = args["gene-input"] || args["g"];
 	var studyInput = args["study-input"] || args["s"];
-	var output = args["output"] || args["o"];
+	var mutationOut = args["mutation-output"] || args["m"];
+	var cnaOut = args["cna-output"] || args["c"];
 
 	// read input files
 	var studies = parseInput(studyInput);
 	var genes = parseInput(geneInput);
+	var page = webPage.create();
 
-	getMutationData(studies, genes, output, function(data) {
-		phantom.exit(0);
+	getMutationData(page, studies, genes, mutationOut, function(mutationData) {
+		getCopyNumberData(page, studies, genes, cnaOut, function(cnaData) {
+			phantom.exit(0);
+		});
 	});
 
-	function getCopyNumberData(studies, genes, output, callback)
+	function getCopyNumberData(page, studies, genes, output, callback)
 	{
-		// TODO for each study, find out all CNA related profiles (genetic_profile_id)
-		var cmd = "getProfileData";
+		// map for <study, profile_ids> pairs
+		var profiles = {};
 
-		// TODO get data with multiple requests, and combine data in a single output
-		var caseSetId = ""; // (case_set_id) "..._all"
+		// map for <study, cna_data> pairs
+		var cnaData = {};
+
+		// for each study, find out all CNA related profiles (genetic_profile_id)
+		console.log("[" + new Date() + "] retrieving genetic profiles ids for all given studies");
+
+		getProfileIds(page, _.clone(studies), profiles, function(profiles) {
+			console.log("[" + new Date() + "] retrieving CNA data for for all given studies");
+
+			// for each genetic profile, get profile data
+			getGeneticProfileData(page, _.pairs(profiles), genes, cnaData, function(cnaData) {
+				// TODO parse, format, output the data
+				console.log("[" + new Date() + "] writing data to the output: " + output);
+				fs.write(output, JSON.stringify(cnaData), 'w');
+
+				if (_.isFunction(callback))
+				{
+					callback(cnaData);
+				}
+			});
+		});
 	}
 
-	function getMutationData(studies, genes, output, callback)
+	function getGeneticProfileData(page, profiles, genes, cnaData, callback)
+	{
+		var pair = profiles.pop();
+		var cmd = "getProfileData";
+		var studyId = pair[0];
+		var caseSetId = studyId + "_all";
+		var profileId = pair[1][0]; // TODO pick the proper profile ID for CNA data...
+
+		var queryString = constructQueryString(cmd, genes, [profileId], caseSetId);
+
+		fetchData(page, queryString, function(data) {
+			// TODO process data?
+			//var lines = data.trim().split(/[\n]+/);
+			cnaData[studyId] = data;
+
+			if (profiles.length > 0)
+			{
+				// recursively process remaining profiles
+				getGeneticProfileData(page, profiles, genes, cnaData, callback);
+			}
+			else
+			{
+				// done processing profiles, callback time...
+				if (_.isFunction(callback))
+				{
+					callback(cnaData);
+				}
+			}
+		}, true);
+	}
+
+	function getProfileIds(page, studies, profiles, callback)
+	{
+		var studyId = studies.pop();
+		var queryString = "cmd=getGeneticProfiles&cancer_study_id=" + studyId;
+
+		fetchData(page, queryString, function(data) {
+			var lines = data.trim().split(/[\n]+/);
+			profiles[studyId] = [];
+
+			// extract only profile ids
+			// (assuming first line is the header line)
+			_.each(lines.slice(1), function(line, lineIdx) {
+				var cols = line.split(/[,\s+]+/);
+
+				// assuming the first column is the genetic_profile_id
+				if (cols.length > 0 && cols[0].length >0)
+				{
+					profiles[studyId].push(cols[0]);
+				}
+			});
+
+			if (studies.length > 0)
+			{
+				// recursively process remaining studies
+				getProfileIds(page, studies, profiles, callback);
+			}
+			else
+			{
+				// done processing studies, callback time...
+				if (_.isFunction(callback))
+				{
+					callback(profiles);
+				}
+			}
+		}, true);
+	}
+
+	function getMutationData(page, studies, genes, output, callback)
 	{
 		var mutationProfiles = constructMutationProfiles(studies);
 		var queryString = constructQueryString("getMutationData", genes, mutationProfiles);
 
-		// create the web page
-		var page = webPage.create();
-
 		// fetch & output the data
 		fetchData(page, queryString, function(data) {
-			// TODO parse, format, output the data
+			// TODO format data before writing to output?
 			console.log("[" + new Date() + "] writing data to the output: " + output);
 			fs.write(output, data, 'w');
-			page.close();
 
 			if (_.isFunction(callback))
 			{
@@ -77,10 +164,10 @@ function main(args)
 			"&case_set_id=" + caseSetId;
 	}
 
-	function fetchData(page, queryString, callback)
+	function fetchData(page, queryString, callback, skipSignIn)
 	{
-		var next = false;
-		var signedIn = false;
+		var next = skipSignIn || false;
+		var signedIn = skipSignIn || false;
 
 		page.onLoadFinished = function(status) {
 			if (status != "success")
@@ -107,7 +194,7 @@ function main(args)
 			}
 			else if (!signedIn)
 			{
-				console.log("[" + new Date() + "] signing in to Google as '" + username + "'");
+				console.log("[" + new Date() + "] signing into Google as '" + username + "'");
 
 				signedIn = page.evaluate(function(args) {
 					function signIn()
@@ -138,12 +225,15 @@ function main(args)
 			// here, we are assuming that we reached to the actual data page
 			else
 			{
-				console.log("[" + new Date() + "] retrieving data from cBioPortal...");
+				console.log("[" + new Date() + "] retrieving data from the cBioPortal web API...");
 				var data = page.evaluate(function() {
 					return document.getElementsByTagName("pre")[0].innerText;
 				});
 
-				callback(data);
+				if (_.isFunction(callback))
+				{
+					callback(data);
+				}
 			}
 		};
 
