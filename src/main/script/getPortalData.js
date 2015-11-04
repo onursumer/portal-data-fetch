@@ -13,8 +13,7 @@ function main(args)
 	var password = args["password"] || args["p"];
 	var geneInput = args["gene-input"] || args["g"];
 	var studyInput = args["study-input"] || args["s"];
-	var mutationOut = args["mutation-output"] || args["m"];
-	var cnaOut = args["cna-output"] || args["c"];
+	var outputDir = args["output-dir"] || args["o"];
 
 	// read input files
 	var studies = parseInput(studyInput);
@@ -29,21 +28,26 @@ function main(args)
 	getProfileIds(page, _.clone(studies), profiles, function(profiles) {
 		console.log("[" + new Date() + "] retrieving mutation data for for all given studies");
 		getMutationData(page, profiles, genes, function(mutationData) {
-			writeToDir(mutationData, mutationOut);
+			writeToDir(mutationData, outputDir, "mutation");
 			console.log("[" + new Date() + "] retrieving CNA data for for all given studies");
 			getCopyNumberData(page, profiles, genes, function(cnaData) {
-				writeToDir(cnaData, cnaOut);
+				writeToDir(cnaData, outputDir, "CNA");
 				page.close();
 				phantom.exit(0);
 			}, true);
 		}, true);
 	}, false);
 
-	function writeToDir(data, output)
+	function writeToDir(data, output, type)
 	{
-		// TODO create separate files for each study...
-		console.log("[" + new Date() + "] writing data to the output: " + output);
-		fs.write(output, JSON.stringify(data), 'w');
+		console.log("[" + new Date() + "] writing " + type + " data to the output directory: " + output);
+
+		_.each(_.pairs(data), function(pair) {
+			var filename = pair[0] + "_" + type;
+
+			fs.write(output + "/" + filename, pair[1], 'w');
+		});
+
 	}
 
 	function getMutationData(page, profiles, genes, callback, skipSignIn)
@@ -71,11 +75,14 @@ function main(args)
 		var caseSetId = studyId + "_all";
 		var profileId = profileIdFn(pair[1]);
 
+		if (profileId == null)
+		{
+			console.log("[" + new Date() + "] WARNING: No matching profile id for " + studyId);
+		}
+
 		var queryString = constructQueryString(cmd, genes, [profileId], caseSetId);
 
 		fetchData(page, queryString, function(data) {
-			// TODO process data?
-			//var lines = data.trim().split(/[\n]+/);
 			profileData[studyId] = data;
 
 			if (profiles.length > 0)
@@ -171,7 +178,6 @@ function main(args)
 
 		// fetch & output the data
 		fetchData(page, queryString, function(data) {
-			// TODO format data before writing to output?
 			console.log("[" + new Date() + "] writing data to the output: " + output);
 			fs.write(output, data, 'w');
 
