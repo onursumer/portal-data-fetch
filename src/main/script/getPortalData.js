@@ -21,72 +21,112 @@ function main(args)
 	var genes = parseInput(geneInput);
 	var page = webPage.create();
 
-	getMutationData(page, studies, genes, mutationOut, function(mutationData) {
-		getCopyNumberData(page, studies, genes, cnaOut, function(cnaData) {
-			phantom.exit(0);
-		});
-	});
+	// map for <study, profile_ids> pairs
+	var profiles = {};
 
-	function getCopyNumberData(page, studies, genes, output, callback)
+	// for each study, find out all profiles (genetic_profile_id)
+	console.log("[" + new Date() + "] retrieving genetic profiles ids for all given studies");
+	getProfileIds(page, _.clone(studies), profiles, function(profiles) {
+		console.log("[" + new Date() + "] retrieving mutation data for for all given studies");
+		getMutationData(page, profiles, genes, function(mutationData) {
+			writeToDir(mutationData, mutationOut);
+			console.log("[" + new Date() + "] retrieving CNA data for for all given studies");
+			getCopyNumberData(page, profiles, genes, function(cnaData) {
+				writeToDir(cnaData, cnaOut);
+				page.close();
+				phantom.exit(0);
+			}, true);
+		}, true);
+	}, false);
+
+	function writeToDir(data, output)
 	{
-		// map for <study, profile_ids> pairs
-		var profiles = {};
+		// TODO create separate files for each study...
+		console.log("[" + new Date() + "] writing data to the output: " + output);
+		fs.write(output, JSON.stringify(data), 'w');
+	}
 
+	function getMutationData(page, profiles, genes, callback, skipSignIn)
+	{
+		// map for <study, mutation_data> pairs
+		var mutationData = {};
+
+		// for each genetic profile, get mutation data
+		getGeneticProfileData(page, "getMutationData", _.pairs(profiles), genes, mutationData, getMutationProfileId, callback, skipSignIn);
+	}
+
+	function getCopyNumberData(page, profiles, genes, callback, skipSignIn)
+	{
 		// map for <study, cna_data> pairs
 		var cnaData = {};
 
-		// for each study, find out all CNA related profiles (genetic_profile_id)
-		console.log("[" + new Date() + "] retrieving genetic profiles ids for all given studies");
-
-		getProfileIds(page, _.clone(studies), profiles, function(profiles) {
-			console.log("[" + new Date() + "] retrieving CNA data for for all given studies");
-
-			// for each genetic profile, get profile data
-			getGeneticProfileData(page, _.pairs(profiles), genes, cnaData, function(cnaData) {
-				// TODO parse, format, output the data
-				console.log("[" + new Date() + "] writing data to the output: " + output);
-				fs.write(output, JSON.stringify(cnaData), 'w');
-
-				if (_.isFunction(callback))
-				{
-					callback(cnaData);
-				}
-			});
-		});
+		// for each genetic profile, get profile data
+		getGeneticProfileData(page, "getProfileData", _.pairs(profiles), genes, cnaData, getCnaProfileId, callback, skipSignIn);
 	}
 
-	function getGeneticProfileData(page, profiles, genes, cnaData, callback)
+	function getGeneticProfileData(page, cmd, profiles, genes, profileData, profileIdFn, callback, skipSignIn)
 	{
 		var pair = profiles.pop();
-		var cmd = "getProfileData";
 		var studyId = pair[0];
 		var caseSetId = studyId + "_all";
-		var profileId = pair[1][0]; // TODO pick the proper profile ID for CNA data...
+		var profileId = profileIdFn(pair[1]);
 
 		var queryString = constructQueryString(cmd, genes, [profileId], caseSetId);
 
 		fetchData(page, queryString, function(data) {
 			// TODO process data?
 			//var lines = data.trim().split(/[\n]+/);
-			cnaData[studyId] = data;
+			profileData[studyId] = data;
 
 			if (profiles.length > 0)
 			{
 				// recursively process remaining profiles
-				getGeneticProfileData(page, profiles, genes, cnaData, callback);
+				// (always skip sign in for the rest of the process)
+				getGeneticProfileData(page, cmd, profiles, genes, profileData, profileIdFn, callback, true);
 			}
 			else
 			{
 				// done processing profiles, callback time...
 				if (_.isFunction(callback))
 				{
-					callback(cnaData);
+					callback(profileData);
 				}
 			}
-		}, true);
+		}, skipSignIn);
 	}
 
-	function getProfileIds(page, studies, profiles, callback)
+	function getCnaProfileId(profiles)
+	{
+		var profile = _.find(profiles, function(profile, idx) {
+			return (profile.toLowerCase().indexOf("_gistic") != -1);
+		});
+
+		if (profile == null)
+		{
+			profile = _.find(profiles, function(profile, idx) {
+				return (profile.toLowerCase().indexOf("_cna") != -1);
+			});
+		}
+
+		if (profile == null)
+		{
+			profile = _.find(profiles, function(profile, idx) {
+				return (profile.toLowerCase().indexOf("_log2cna") != -1);
+			});
+		}
+
+		return profile;
+	}
+
+	function getMutationProfileId(profiles)
+	{
+		return _.find(profiles, function (profile, idx)
+		{
+			return (profile.toLowerCase().indexOf("_mutation") != -1);
+		});
+	}
+
+	function getProfileIds(page, studies, profiles, callback, skipSignIn)
 	{
 		var studyId = studies.pop();
 		var queryString = "cmd=getGeneticProfiles&cancer_study_id=" + studyId;
@@ -110,7 +150,8 @@ function main(args)
 			if (studies.length > 0)
 			{
 				// recursively process remaining studies
-				getProfileIds(page, studies, profiles, callback);
+				// (always skip sign in for the rest of the process)
+				getProfileIds(page, studies, profiles, callback, true);
 			}
 			else
 			{
@@ -120,10 +161,10 @@ function main(args)
 					callback(profiles);
 				}
 			}
-		}, true);
+		}, skipSignIn);
 	}
 
-	function getMutationData(page, studies, genes, output, callback)
+	function getCombinedMutationData(page, studies, genes, output, callback, skipSignIn)
 	{
 		var mutationProfiles = constructMutationProfiles(studies);
 		var queryString = constructQueryString("getMutationData", genes, mutationProfiles);
@@ -138,7 +179,7 @@ function main(args)
 			{
 				callback(data);
 			}
-		});
+		}, skipSignIn);
 	}
 
 	function parseInput(input)
