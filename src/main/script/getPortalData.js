@@ -8,12 +8,22 @@ var _ = require('underscore');
 function main(args)
 {
 	// process args
-	var baseUrl = args["base-url"] || "http://www.cbioportal.org/private/webservice.do";
+	var baseUrl = args["base-url"] || args["b"] || "http://www.cbioportal.org/private/webservice.do";
 	var username = args["username"] || args["u"];
 	var password = args["password"] || args["p"];
 	var geneInput = args["gene-input"] || args["g"];
 	var studyInput = args["study-input"] || args["s"];
-	var outputDir = args["output-dir"] || args["o"];
+	var outputDir = args["output-dir"] || args["o"] || ".";
+
+	if (geneInput == null || geneInput.length == 0 ||
+		studyInput == null || studyInput.length == 0)
+	{
+		invalidArgs();
+		phantom.exit(-1);
+	}
+
+	var skipSignIn = (username == null || username.length == 0 ||
+		password == null || password.length == 0);
 
 	// read input files
 	var studies = parseInput(studyInput);
@@ -36,7 +46,7 @@ function main(args)
 				phantom.exit(0);
 			}, true);
 		}, true);
-	}, false);
+	}, skipSignIn);
 
 	function writeToDir(data, output, type)
 	{
@@ -285,6 +295,23 @@ function main(args)
 		};
 
 		page.open(baseUrl + "?" + queryString);
+	}
+
+	function invalidArgs()
+	{
+		console.log("ERROR: Invalid or missing arguments.\n");
+
+		var usage = [];
+
+		usage.push("Usage:");
+		usage.push('-b, --base-url <url>: URL for the cBioPortal web service.');
+		usage.push('-g, --gene-input <path>: Path for the input file containing a list of genes.');
+		usage.push('-s, --study-input <path>: Path for the input file containing a list of studies.');
+		usage.push('-o, --output <path>: Path for the output directory.');
+		usage.push('-u, --username <string>: Google username.');
+		usage.push('-p, --fragment-filter <string>: Google password.');
+
+		console.log(usage.join("\n"));
 	}
 }
 
