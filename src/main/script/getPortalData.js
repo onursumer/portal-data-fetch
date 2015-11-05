@@ -8,6 +8,7 @@ var _ = require('underscore');
 function main(args)
 {
 	// process args
+	var loginUrl = args["login-url"] || args["l"] || "http://www.cbioportal.org/private/login.jsp";
 	var baseUrl = args["base-url"] || args["b"] || "http://www.cbioportal.org/private/webservice.do";
 	var username = args["username"] || args["u"];
 	var password = args["password"] || args["p"];
@@ -22,7 +23,8 @@ function main(args)
 		phantom.exit(-1);
 	}
 
-	var skipSignIn = (username == null || username.length == 0 ||
+	var skipLogin = (loginUrl == null || loginUrl.length == 0 ||
+		username == null || username.length == 0 ||
 		password == null || password.length == 0);
 
 	// read input files
@@ -33,20 +35,34 @@ function main(args)
 	// map for <study, profile_ids> pairs
 	var profiles = {};
 
-	// for each study, find out all profiles (genetic_profile_id)
-	console.log("[" + new Date() + "] retrieving genetic profiles ids for all given studies");
-	getProfileIds(page, _.clone(studies), profiles, function(profiles) {
-		console.log("[" + new Date() + "] retrieving mutation data for for all given studies");
-		getMutationData(page, profiles, genes, function(mutationData) {
-			writeToDir(mutationData, outputDir, "mutation");
-			console.log("[" + new Date() + "] retrieving CNA data for for all given studies");
-			getCopyNumberData(page, profiles, genes, function(cnaData) {
-				writeToDir(cnaData, outputDir, "CNA");
-				page.close();
-				phantom.exit(0);
-			}, true);
-		}, true);
-	}, skipSignIn);
+	if (skipLogin)
+	{
+		retrieveData(page, baseUrl, studies, profiles, genes, outputDir);
+	}
+	else
+	{
+		login(page, loginUrl, username, password, function(status) {
+			retrieveData(page, baseUrl, studies, profiles, genes, outputDir);
+		});
+	}
+
+	function retrieveData(page, baseUrl, studies, profiles, genes, outputDir)
+	{
+		// for each study, find out all profiles (genetic_profile_id)
+		console.log("[" + new Date() + "] retrieving genetic profiles ids for all given studies");
+		getProfileIds(page, baseUrl, _.clone(studies), profiles, function(profiles) {
+			console.log("[" + new Date() + "] retrieving mutation data for for all given studies");
+			getMutationData(page, baseUrl, profiles, genes, function(mutationData) {
+				writeToDir(mutationData, outputDir, "mutation");
+				console.log("[" + new Date() + "] retrieving CNA data for for all given studies");
+				getCopyNumberData(page, baseUrl, profiles, genes, function(cnaData) {
+					writeToDir(cnaData, outputDir, "CNA");
+					page.close();
+					phantom.exit(0);
+				});
+			});
+		});
+	}
 
 	function writeToDir(data, output, type)
 	{
@@ -60,25 +76,25 @@ function main(args)
 
 	}
 
-	function getMutationData(page, profiles, genes, callback, skipSignIn)
+	function getMutationData(page, baseUrl, profiles, genes, callback)
 	{
 		// map for <study, mutation_data> pairs
 		var mutationData = {};
 
 		// for each genetic profile, get mutation data
-		getGeneticProfileData(page, "getMutationData", _.pairs(profiles), genes, mutationData, getMutationProfileId, callback, skipSignIn);
+		getGeneticProfileData(page, baseUrl, "getMutationData", _.pairs(profiles), genes, mutationData, getMutationProfileId, callback);
 	}
 
-	function getCopyNumberData(page, profiles, genes, callback, skipSignIn)
+	function getCopyNumberData(page, baseUrl, profiles, genes, callback)
 	{
 		// map for <study, cna_data> pairs
 		var cnaData = {};
 
 		// for each genetic profile, get profile data
-		getGeneticProfileData(page, "getProfileData", _.pairs(profiles), genes, cnaData, getCnaProfileId, callback, skipSignIn);
+		getGeneticProfileData(page, baseUrl, "getProfileData", _.pairs(profiles), genes, cnaData, getCnaProfileId, callback);
 	}
 
-	function getGeneticProfileData(page, cmd, profiles, genes, profileData, profileIdFn, callback, skipSignIn)
+	function getGeneticProfileData(page, baseUrl, cmd, profiles, genes, profileData, profileIdFn, callback)
 	{
 		var pair = profiles.pop();
 		var studyId = pair[0];
@@ -92,14 +108,13 @@ function main(args)
 
 		var queryString = constructQueryString(cmd, genes, [profileId], caseSetId);
 
-		fetchData(page, queryString, function(data) {
+		fetchData(page, baseUrl, queryString, function(data) {
 			profileData[studyId] = data;
 
 			if (profiles.length > 0)
 			{
 				// recursively process remaining profiles
-				// (always skip sign in for the rest of the process)
-				getGeneticProfileData(page, cmd, profiles, genes, profileData, profileIdFn, callback, true);
+				getGeneticProfileData(page, baseUrl, cmd, profiles, genes, profileData, profileIdFn, callback);
 			}
 			else
 			{
@@ -109,7 +124,7 @@ function main(args)
 					callback(profileData);
 				}
 			}
-		}, skipSignIn);
+		});
 	}
 
 	function getCnaProfileId(profiles)
@@ -143,12 +158,12 @@ function main(args)
 		});
 	}
 
-	function getProfileIds(page, studies, profiles, callback, skipSignIn)
+	function getProfileIds(page, baseUrl, studies, profiles, callback)
 	{
 		var studyId = studies.pop();
 		var queryString = "cmd=getGeneticProfiles&cancer_study_id=" + studyId;
 
-		fetchData(page, queryString, function(data) {
+		fetchData(page, baseUrl, queryString, function(data) {
 			var lines = data.trim().split(/[\n]+/);
 			profiles[studyId] = [];
 
@@ -167,8 +182,7 @@ function main(args)
 			if (studies.length > 0)
 			{
 				// recursively process remaining studies
-				// (always skip sign in for the rest of the process)
-				getProfileIds(page, studies, profiles, callback, true);
+				getProfileIds(page, baseUrl, studies, profiles, callback);
 			}
 			else
 			{
@@ -178,16 +192,16 @@ function main(args)
 					callback(profiles);
 				}
 			}
-		}, skipSignIn);
+		});
 	}
 
-	function getCombinedMutationData(page, studies, genes, output, callback, skipSignIn)
+	function getCombinedMutationData(page, baseUrl, studies, genes, output, callback)
 	{
 		var mutationProfiles = constructMutationProfiles(studies);
 		var queryString = constructQueryString("getMutationData", genes, mutationProfiles);
 
 		// fetch & output the data
-		fetchData(page, queryString, function(data) {
+		fetchData(page, baseUrl, queryString, function(data) {
 			console.log("[" + new Date() + "] writing data to the output: " + output);
 			fs.write(output, data, 'w');
 
@@ -195,7 +209,7 @@ function main(args)
 			{
 				callback(data);
 			}
-		}, skipSignIn);
+		});
 	}
 
 	function parseInput(input)
@@ -221,10 +235,10 @@ function main(args)
 			"&case_set_id=" + caseSetId;
 	}
 
-	function fetchData(page, queryString, callback, skipSignIn)
+	function login(page, loginUrl, username, password, callback)
 	{
-		var next = skipSignIn || false;
-		var signedIn = skipSignIn || false;
+		var next = false;
+		var signedIn = false;
 
 		page.onLoadFinished = function(status) {
 			if (status != "success")
@@ -236,7 +250,7 @@ function main(args)
 
 			if (!next)
 			{
-				console.log("[" + new Date() + "] entering the cBioPortal page...");
+				console.log("[" + new Date() + "] entering the cBioPortal login page...");
 
 				next = page.evaluate(function() {
 					if (window.location.pathname.indexOf("login.jsp") != -1)
@@ -279,18 +293,34 @@ function main(args)
 					return false;
 				}, {username: username, password: password});
 			}
-			// here, we are assuming that we reached to the actual data page
+			// here, we are assuming that we successfully signed into portal
 			else
 			{
-				console.log("[" + new Date() + "] retrieving data from the cBioPortal web API...");
-				var data = page.evaluate(function() {
-					return document.getElementsByTagName("pre")[0].innerText;
-				});
+				callback();
+			}
+		};
 
-				if (_.isFunction(callback))
-				{
-					callback(data);
-				}
+		page.open(loginUrl);
+	}
+
+	function fetchData(page, baseUrl, queryString, callback)
+	{
+		page.onLoadFinished = function(status) {
+			if (status != "success")
+			{
+				// TODO there is something wrong!
+				console.log("[" + new Date() + "] something went wrong!");
+				phantom.exit(1);
+			}
+
+			console.log("[" + new Date() + "] retrieving data from the cBioPortal web API...");
+			var data = page.evaluate(function() {
+				return document.getElementsByTagName("pre")[0].innerText;
+			});
+
+			if (_.isFunction(callback))
+			{
+				callback(data);
 			}
 		};
 
@@ -305,6 +335,7 @@ function main(args)
 
 		usage.push("Usage:");
 		usage.push('-b, --base-url <url>: URL for the cBioPortal web service.');
+		usage.push('-l, --login-url <url>: URL for the cBioPortal login page.');
 		usage.push('-g, --gene-input <path>: Path for the input file containing a list of genes.');
 		usage.push('-s, --study-input <path>: Path for the input file containing a list of studies.');
 		usage.push('-o, --output <path>: Path for the output directory.');
