@@ -105,6 +105,10 @@ function main(args)
 		{
 			console.log("[" + new Date() + "] WARNING: No matching profile id for " + studyId);
 		}
+		else
+		{
+			console.log("[" + new Date() + "] retrieving profile data for " + profileId);
+		}
 
 		var queryString = constructQueryString(cmd, genes, [profileId], caseSetId);
 
@@ -163,6 +167,7 @@ function main(args)
 		var studyId = studies.pop();
 		var queryString = "cmd=getGeneticProfiles&cancer_study_id=" + studyId;
 
+		console.log("[" + new Date() + "] retrieving profile ids for " + studyId);
 		fetchData(page, baseUrl, queryString, function(data) {
 			var lines = data.trim().split(/[\n]+/);
 			profiles[studyId] = [];
@@ -313,7 +318,6 @@ function main(args)
 				phantom.exit(1);
 			}
 
-			console.log("[" + new Date() + "] retrieving data from the cBioPortal web API...");
 			var data = page.evaluate(function() {
 				return document.getElementsByTagName("pre")[0].innerText;
 			});
