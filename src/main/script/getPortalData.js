@@ -24,8 +24,7 @@ function main(args)
 	}
 
 	var skipLogin = (loginUrl == null || loginUrl.length == 0 ||
-		username == null || username.length == 0 ||
-		password == null || password.length == 0);
+		username == null || username.length == 0);
 
 	// read input files
 	var studies = parseInput(studyInput);
@@ -42,7 +41,16 @@ function main(args)
 	else
 	{
 		login(page, loginUrl, username, password, function(status) {
-			retrieveData(page, baseUrl, studies, profiles, genes, outputDir);
+
+			if (status == "success")
+			{
+				retrieveData(page, baseUrl, studies, profiles, genes, outputDir);
+			}
+			else
+			{
+				console.log("[" + new Date() + "] login failed. invalid password?");
+				phantom.exit(2);
+			}
 		});
 	}
 
@@ -245,6 +253,15 @@ function main(args)
 		var next = false;
 		var signedIn = false;
 
+		// if no password provided as a parameter,
+		// then prompt password input at runtime
+		if (password == null)
+		{
+			console.log("Enter password (for user " + username + "): ");
+			var input = system.stdin.readLine();
+			password = input.trim();
+		}
+
 		page.onLoadFinished = function(status) {
 			if (status != "success")
 			{
@@ -301,7 +318,16 @@ function main(args)
 			// here, we are assuming that we successfully signed into portal
 			else
 			{
-				callback();
+				var loginStatus = page.evaluate(function() {
+					if (window.location.pathname.indexOf("index") != -1)
+					{
+						return "success";
+					}
+
+					return "error";
+				});
+
+				callback(loginStatus);
 			}
 		};
 
