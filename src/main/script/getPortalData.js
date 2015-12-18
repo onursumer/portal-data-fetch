@@ -370,7 +370,7 @@ function main(args)
 		usage.push('-s, --study-input <path>: Path for the input file containing a list of studies.');
 		usage.push('-o, --output <path>: Path for the output directory.');
 		usage.push('-u, --username <string>: Google username.');
-		usage.push('-p, --fragment-filter <string>: Google password.');
+		usage.push('-p, --password <string>: Google password.');
 
 		console.log(usage.join("\n"));
 	}
