@@ -90,7 +90,8 @@ function main(args)
 		var mutationData = {};
 
 		// for each genetic profile, get mutation data
-		getGeneticProfileData(page, baseUrl, "getMutationData", _.pairs(profiles), genes, mutationData, getMutationProfileId, callback);
+		//getGeneticProfileData(page, baseUrl, "getMutationData", _.pairs(profiles), genes, mutationData, getMutationProfileId, callback);
+		getGeneticProfileData(page, baseUrl, "getProfileData", _.pairs(profiles), genes, mutationData, getMutationProfileId, callback);
 	}
 
 	function getCopyNumberData(page, baseUrl, profiles, genes, callback)
